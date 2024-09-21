@@ -1,0 +1,509 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Ollama Template</title>
+    <!-- Font Awesome for Icons -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.1.1/css/all.min.css" integrity="sha512-KfkfwYDsLkIlwQp6LFnl8zNdLGxu9YAA1QvwINks4PhcElQSvqcyVLLD9aMhXd13uQjoXtEKNosOWaZqXgel0g==" crossorigin="anonymous" referrerpolicy="no-referrer" />
+    <!-- jQuery -->
+    <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
+    <!-- Ollama JS Client -->
+    <script src="https://cdn.jsdelivr.net/npm/ollama-js-client/dist/browser/iife/ollama-js.global.js"></script>
+    <style>
+        * {
+            box-sizing: border-box;
+        }
+
+        body {
+            background-color: #f4f6f9;
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            height: 100vh;
+            margin: 0;
+        }
+        .chat-container {
+            background-color: #ffffff;
+            width: 600px; /* Fixed width */
+            height: 600px; /* Fixed height */
+            max-width: 100%;
+            max-height: 100%;
+            border-radius: 10px;
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+        }
+        .chat-header {
+            background-color: #4a90e2;
+            color: #ffffff;
+            padding: 15px;
+            text-align: center;
+            font-size: 1.5em;
+            position: relative;
+            flex: 0 0 auto;
+        }
+        .toggle-container {
+            position: absolute;
+            right: 15px;
+            top: 15px;
+            display: flex;
+            align-items: center;
+            cursor: pointer;
+            font-size: 0.9em;
+            user-select: none;
+        }
+        .toggle-container label {
+            margin-left: 8px;
+            color: #ffffff;
+            cursor: pointer;
+        }
+        .toggle-switch {
+            position: relative;
+            width: 50px;
+            height: 24px;
+        }
+        .toggle-switch input {
+            display: none;
+        }
+        .toggle-switch .slider {
+            width: 100%;
+            height: 100%;
+            background-color: #ccc;
+            border-radius: 12px;
+            position: relative;
+            transition: background-color 0.3s;
+        }
+        .toggle-switch .slider::before {
+            content: "";
+            position: absolute;
+            width: 20px;
+            height: 20px;
+            left: 2px;
+            top: 2px;
+            background-color: #ffffff;
+            border-radius: 50%;
+            transition: transform 0.3s;
+        }
+        .toggle-switch input:checked + .slider {
+            background-color: #4caf50;
+        }
+        .toggle-switch input:checked + .slider::before {
+            transform: translateX(26px);
+        }
+        .chat-messages {
+            flex: 1 1 auto;
+            padding: 15px;
+            overflow-y: auto;
+            background-color: #f9f9f9;
+            position: relative;
+        }
+        .message {
+            margin-bottom: 15px;
+            display: flex;
+            align-items: flex-end;
+            width: 100%;
+        }
+        .message.user {
+            justify-content: flex-end;
+            flex-direction: row; /* Normal row */
+        }
+        .message.ai {
+            justify-content: flex-start;
+            flex-direction: row; /* Normal row */
+        }
+        .message.user .avatar {
+            margin-right: 10px; /* Space between avatar and message bubble */
+        }
+        .message.ai .avatar {
+            margin-right: 10px; /* Space between avatar and message bubble */
+        }
+
+        .message.user {
+            margin-left: auto; /* Push to the right */
+        }
+
+        .message.user .message-content {
+            background-color: #4a90e2;
+            color: #ffffff;
+            border-radius: 15px 15px 0 15px;
+            padding: 8px 12px;
+            font-size: 1em;
+            word-wrap: break-word;
+            white-space: pre-wrap; /* Preserves spaces and line breaks */
+            max-width: 70%;
+        }
+        .message.ai .message-content {
+            background-color: #e1e1e1;
+            color: #000000;
+            border-radius: 15px 15px 15px 0;
+            padding: 8px 12px;
+            font-size: 1em;
+            word-wrap: break-word;
+            white-space: pre-wrap; /* Preserves spaces and line breaks */
+            max-width: 70%;
+        }
+        .avatar {
+            font-size: 1.5em;
+            color: #ffffff;
+            background-color: #4a90e2;
+            width: 40px;
+            height: 40px;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+        .message.ai .avatar {
+            background-color: #6c757d; /* Different background for AI */
+        }
+        .placeholder-message {
+            color: #888888;
+            text-align: center;
+            font-style: italic;
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            pointer-events: none; /* Allows clicks to pass through */
+            max-width: 80%;
+        }
+        .chat-input {
+            display: flex;
+            padding: 10px;
+            border-top: 1px solid #ddd;
+            background-color: #ffffff;
+            flex: 0 0 auto;
+            align-items: center; /* Vertically centers the button */
+        }
+        .chat-input textarea {
+            flex: 1;
+            padding: 6px 12px; /* Reduced vertical padding for single-line appearance */
+            border: 1px solid #ddd;
+            border-radius: 20px;
+            outline: none;
+            font-size: 1em;
+            resize: none; /* Prevents manual resizing */
+            min-height: 30px; /* Minimum height for single line */
+            max-height: 120px; /* Maximum height */
+            line-height: 1.4;
+            transition: border-color 0.3s, height 0.2s;
+            overflow: hidden; /* Hides scrollbar */
+            background-color: #f1f1f1;
+        }
+        .chat-input textarea:focus {
+            border-color: #4a90e2;
+            background-color: #ffffff;
+        }
+        .chat-input button {
+            background-color: #4a90e2;
+            border: none;
+            color: #ffffff;
+            width: 40px; /* Fixed width */
+            height: 40px; /* Fixed height */
+            margin-left: 10px;
+            border-radius: 50%; /* Perfect circle */
+            cursor: pointer;
+            font-size: 1.2em;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            transition: background-color 0.3s;
+        }
+        .chat-input button:disabled {
+            background-color: #a0c4e8;
+            cursor: not-allowed;
+        }
+        .chat-input button:hover:not(:disabled) {
+            background-color: #357ABD; /* Darker shade on hover */
+        }
+        .loading-indicator {
+            display: none;
+            align-items: center;
+            justify-content: center;
+            padding: 10px;
+            flex: 0 0 auto;
+        }
+        .loading-indicator.active {
+            display: flex;
+        }
+        .loading-indicator i {
+            animation: spin 1s linear infinite;
+            font-size: 1.5em;
+            color: #4a90e2;
+        }
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+
+        /* Responsiveness for smaller screens */
+        @media (max-width: 650px) {
+            .chat-container {
+                width: 90%;
+                height: 80vh;
+            }
+        }
+    </style>
+</head>
+<body>
+
+<div class="chat-container">
+    <div class="chat-header">
+        AI Chat
+        <div class="toggle-container">
+            <label for="modeToggle" class="toggle-switch">
+                <input type="checkbox" id="modeToggle" checked>
+                <div class="slider"></div>
+            </label>
+            <label for="modeToggle" id="toggleLabel">Real-Time</label>
+        </div>
+    </div>
+    <div class="chat-messages" id="chatMessages">
+        <div class="placeholder-message" id="placeholderMessage">Send a message to start the discussion.</div>
+        <!-- Messages will appear here -->
+    </div>
+    <div class="loading-indicator" id="loadingIndicator">
+        <i class="fas fa-spinner"></i>
+    </div>
+    <div class="chat-input">
+        <textarea id="messageInput" placeholder="Enter your message..." rows="1" autofocus></textarea>
+        <button id="sendButton"><i class="fas fa-paper-plane"></i></button>
+    </div>
+</div>
+
+<script>
+    // Provided Functions
+    async function sendRequestToLLM(messages, isStreaming, onStream) {
+        const Ollama = window.OllamaJS;
+        const ollama_instance = new Ollama({
+            model: "llama3.1",
+            url: "http://127.0.0.1:11434/api/"
+        });
+
+        if (isStreaming) {
+            return new Promise((resolve, reject) => {
+                let fullResponse = '';
+                ollama_instance.chat(messages, (error, response) => {
+                    if (error) {
+                        console.error('Error sending request to LLM:', error);
+                        reject(error);
+                    } else {
+                        console.log('Received response fragment:', response);
+                        if (response.done) {
+                            resolve(fullResponse);
+                        } else if (response.message && response.message.content) {
+                            const chunk = response.message.content; // Removed .trim()
+                            fullResponse += chunk;
+                            if (onStream) {
+                                onStream(chunk);
+                            }
+                        } else {
+                            console.warn('Unexpected response format:', response);
+                        }
+                    }
+                });
+            });
+        } else {
+            try {
+                console.log('Sending request to LLM:', messages);
+                const response = await ollama_instance.chat_request(messages);
+                console.log('Received full response from LLM:', response);
+                return response;
+            } catch (error) {
+                console.error('Error sending request to LLM:', error);
+                throw error;
+            }
+        }
+    }
+
+    function getResponseText(response) {
+        if (response && response.message && response.message.content) {
+            return response.message.content; // Removed .trim()
+        }
+        return null;
+    }
+
+    function getResponseJSON(response) {
+        if (response && response.message && response.message.content) {
+            try {
+                const jsonMatch = response.message.content.match(/{[\s\S]*}/);
+                if (jsonMatch && jsonMatch.length > 0) {
+                    const jsonText = jsonMatch[0];
+                    console.log('Received JSON:', jsonText);
+                    return JSON.parse(jsonText);
+                } else {
+                    throw new Error('No JSON object found in the response.');
+                }
+            } catch (error) {
+                console.error('JSON parsing error:', error);
+                console.error('Original text:', response.message.content);
+            }
+        }
+        return null;
+    }
+
+    // Chat Functionality
+    $(document).ready(function() {
+        const $sendButton = $('#sendButton');
+        const $messageInput = $('#messageInput');
+        const $chatMessages = $('#chatMessages');
+        const $modeToggle = $('#modeToggle');
+        const $loadingIndicator = $('#loadingIndicator');
+        const $toggleLabel = $('#toggleLabel');
+        const $placeholderMessage = $('#placeholderMessage');
+
+        // Initialize messages array with system prompt
+        let messages = [
+            { role: "system", content: "You are a helpful AI assistant." }
+        ];
+
+        let isRealTime = $modeToggle.is(':checked'); // Default mode: Real-Time
+
+        // Toggle Switch Handler
+        $modeToggle.change(function() {
+            isRealTime = $(this).is(':checked');
+            $toggleLabel.text(isRealTime ? 'Real-Time' : 'Wait');
+            console.log('Mode changed to:', isRealTime ? 'Real-Time' : 'Wait');
+        });
+
+        // Send Button Click Handler
+        $sendButton.click(function() {
+            sendMessage();
+        });
+
+        // Enter Key Handler with Shift+Enter for newline
+        $messageInput.keydown(function(e) {
+            if (e.key === 'Enter') {
+                if (e.shiftKey) {
+                    // Insert newline
+                    const cursorPos = this.selectionStart;
+                    const text = $(this).val();
+                    const newText = text.substring(0, cursorPos) + "\n" + text.substring(cursorPos);
+                    $(this).val(newText);
+                    this.selectionStart = this.selectionEnd = cursorPos + 1;
+                    autoResizeTextarea();
+                    e.preventDefault(); // Prevents the default action (newline is already handled)
+                } else {
+                    // Send message
+                    sendMessage();
+                    e.preventDefault(); // Prevents adding a newline
+                }
+            }
+        });
+
+        async function sendMessage() {
+            const message = $messageInput.val().trim();
+            if (message === '') return;
+
+            // Remove placeholder if it's the first message
+            if ($chatMessages.find('.placeholder-message').length > 0) {
+                $chatMessages.find('.placeholder-message').remove();
+            }
+
+            // Append user message with avatar
+            appendMessage('user', message);
+            // Add user message to messages array
+            messages.push({ role: "user", content: message });
+
+            $messageInput.val('');
+            resetTextarea(); // Reset textarea height
+            $sendButton.prop('disabled', true);
+            if (!isRealTime) {
+                $loadingIndicator.addClass('active');
+            }
+
+            if (isRealTime) {
+                appendMessage('ai', ''); // Add empty AI message with avatar
+                const $aiMessage = $chatMessages.find('.message.ai:last .message-content');
+
+                try {
+                    await sendRequestToLLM(messages, true, (chunk) => {
+                        $aiMessage.append(escapeHtml(chunk));
+                        scrollToBottom();
+                    });
+                    // Optionally, you can append the AI message to the messages array here if streaming isn't handling it
+                } catch (error) {
+                    appendMessage('ai', "An error occurred. Please try again.");
+                    // Add error message to messages array
+                    messages.push({ role: "assistant", content: "An error occurred. Please try again." });
+                } finally {
+                    $sendButton.prop('disabled', false);
+                    scrollToBottom();
+                }
+            } else {
+                try {
+                    const response = await sendRequestToLLM(messages, false);
+                    const responseText = getResponseText(response);
+                    if (responseText) {
+                        appendMessage('ai', escapeHtml(responseText));
+                        // Add AI response to messages array
+                        messages.push({ role: "assistant", content: responseText });
+                    } else {
+                        appendMessage('ai', "Sorry, I couldn't understand your request.");
+                        // Add fallback message to messages array
+                        messages.push({ role: "assistant", content: "Sorry, I couldn't understand your request." });
+                    }
+                } catch (error) {
+                    appendMessage('ai', "An error occurred. Please try again.");
+                    // Add error message to messages array
+                    messages.push({ role: "assistant", content: "An error occurred. Please try again." });
+                } finally {
+                    $sendButton.prop('disabled', false);
+                    $loadingIndicator.removeClass('active');
+                    scrollToBottom();
+                }
+            }
+        }
+
+        function appendMessage(sender, text) {
+            const messageClass = sender === 'user' ? 'user' : 'ai';
+            const avatarClass = sender === 'user' ? 'fa-user' : 'fa-robot';
+            const avatarBgColor = sender === 'user' ? '#4a90e2' : '#6c757d'; // Different background colors
+
+            const messageElement = $(`
+                <div class="message ${messageClass}">
+                    <i class="fas ${avatarClass} avatar"></i>
+                    <div class="message-content">${text ? text : ''}</div>
+                </div>
+            `);
+
+            // Apply background color to avatar
+            messageElement.find('.avatar').css('background-color', avatarBgColor);
+
+            $chatMessages.append(messageElement);
+            scrollToBottom();
+        }
+
+        function scrollToBottom() {
+            $chatMessages.scrollTop($chatMessages.prop("scrollHeight"));
+        }
+
+        function escapeHtml(text) {
+            if (!text) return '';
+            return text
+                .replace(/&/g, "&amp;")
+                .replace(/</g, "&lt;")
+                .replace(/>/g, "&gt;");
+        }
+
+        // Auto-resize textarea based on content
+        function autoResizeTextarea() {
+            $messageInput[0].style.height = 'auto'; // Reset height
+            const newHeight = Math.min($messageInput[0].scrollHeight, 120); // Max height: 120px
+            $messageInput[0].style.height = newHeight + 'px';
+        }
+
+        function resetTextarea() {
+            $messageInput[0].style.height = '30px'; // Reset to single line height
+        }
+
+        $messageInput.on('input', function() {
+            autoResizeTextarea();
+        });
+    });
+</script>
+
+</body>
+</html>
