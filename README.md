@@ -55,23 +55,6 @@ A minimal, feature-rich chat interface that brings the power of local AI models 
 2. **Send messages** - Press `Enter` to send or `Shift+Enter` for new lines
 3. **Switch modes** - Toggle between streaming and waiting modes in settings
 
-### Markdown Support
-```markdown
-**Bold text** and *italic*
-- Lists
-- With sub-items
-
-> Blockquotes
-
-# Headers
-## Subheaders
-
-`inline code` and code blocks:
-```javascript
-console.log("Hello, World!");
-```
-```
-
 ## ⚙️ Configuration
 
 Access settings via the gear icon in the header:
