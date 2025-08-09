@@ -52,6 +52,12 @@
             
             <!-- Input form -->
             <form id="chatForm" class="chat-input-area">
+                <div class="input-controls">
+                    <button type="button" id="attachImageButton" class="attach-button" title="Attach image">
+                        <i class="fas fa-image"></i>
+                    </button>
+                    <input type="file" id="imageInput" accept="image/*" style="display: none;">
+                </div>
                 <textarea id="messageInput" placeholder="Type your message... (Shift+Enter for new line)" rows="1"></textarea>
                 <button id="sendButton" class="send-button" type="submit" title="Send">
                     <i class="fas fa-paper-plane"></i>

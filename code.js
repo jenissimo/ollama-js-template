@@ -34,7 +34,30 @@ const llmApi = {
             model = await this._getDefaultModel();
             localStorage.setItem('selectedModel', model);
         }
-        const body = { model, messages, stream, options: {} };
+        
+        // Process messages to handle images
+        const processedMessages = messages.map(message => {
+            const processedMessage = { ...message };
+            
+            // If message has images, convert them to base64 if they aren't already
+            if (message.images && message.images.length > 0) {
+                processedMessage.images = message.images.map(img => {
+                    // If it's already a base64 string, return as is
+                    if (typeof img === 'string') {
+                        return img;
+                    }
+                    // If it's an object with base64 property, return the base64 string
+                    if (img && typeof img === 'object' && img.base64) {
+                        return img.base64;
+                    }
+                    return img;
+                });
+            }
+            
+            return processedMessage;
+        });
+        
+        const body = { model, messages: processedMessages, stream, options: {} };
         if (temperature != null) body.options.temperature = Number(temperature);
         if (numCtx) body.options.num_ctx = Number(numCtx);
         return body;
@@ -208,6 +231,79 @@ const utils = {
     debounce(func, wait) {
         let timeout;
         return (...args) => { clearTimeout(timeout); timeout = setTimeout(() => func.apply(this, args), wait); };
+    },
+
+    // Image handling functions
+    async fileToBase64(file) {
+        return new Promise((resolve, reject) => {
+            const reader = new FileReader();
+            reader.onload = () => resolve(reader.result);
+            reader.onerror = reject;
+            reader.readAsDataURL(file);
+        });
+    },
+
+    async compressImage(file, maxWidth = 1024, maxHeight = 1024, quality = 0.8) {
+        return new Promise((resolve) => {
+            const canvas = document.createElement('canvas');
+            const ctx = canvas.getContext('2d');
+            const img = new Image();
+            
+            img.onload = () => {
+                let { width, height } = img;
+                
+                // Calculate new dimensions
+                if (width > height) {
+                    if (width > maxWidth) {
+                        height = (height * maxWidth) / width;
+                        width = maxWidth;
+                    }
+                } else {
+                    if (height > maxHeight) {
+                        width = (width * maxHeight) / height;
+                        height = maxHeight;
+                    }
+                }
+                
+                canvas.width = width;
+                canvas.height = height;
+                
+                ctx.drawImage(img, 0, 0, width, height);
+                
+                canvas.toBlob(resolve, 'image/jpeg', quality);
+            };
+            
+            img.src = URL.createObjectURL(file);
+        });
+    },
+
+    createImagePreview(file, onRemove) {
+        const $previewItem = $('<div class="image-preview-item"></div>');
+        const $img = $('<img>');
+        const $removeBtn = $('<button class="remove-image" title="Remove image"><i class="fas fa-times"></i></button>');
+        
+        $previewItem.append($img, $removeBtn);
+        
+        const reader = new FileReader();
+        reader.onload = (e) => {
+            $img.attr('src', e.target.result);
+        };
+        reader.onerror = () => {
+            $img.attr('src', 'data:image/svg+xml,<svg xmlns="http://www.w3.org/2000/svg" width="80" height="80" viewBox="0 0 80 80"><rect width="80" height="80" fill="%23f0f0f0"/><text x="40" y="40" text-anchor="middle" dy=".3em" fill="%23999" font-size="12">Error</text></svg>');
+        };
+        reader.readAsDataURL(file);
+        
+        // Add error handling for image loading
+        $img.on('error', function() {
+            $(this).attr('src', 'data:image/svg+xml,<svg xmlns="http://www.w3.org/2000/svg" width="80" height="80" viewBox="0 0 80 80"><rect width="80" height="80" fill="%23f0f0f0"/><text x="40" y="40" text-anchor="middle" dy=".3em" fill="%23999" font-size="12">Error</text></svg>');
+        });
+        
+        $removeBtn.on('click', () => {
+            $previewItem.remove();
+            if (onRemove) onRemove();
+        });
+        
+        return $previewItem;
     }
 };
 
@@ -220,12 +316,16 @@ $(document).ready(function () {
         messageInput: $('#messageInput'),
         sendButton: $('#sendButton'),
         loadingIndicator: $('#loadingIndicator'),
-        scrollToBottomBtn: $('#scrollToBottomBtn')
+        scrollToBottomBtn: $('#scrollToBottomBtn'),
+        attachImageButton: $('#attachImageButton'),
+        imageInput: $('#imageInput'),
+        imagePreview: null // Will be created dynamically
     };
 
     // --- State Management ---
     const state = {
         messages: [],
+        attachedImages: [], // New: array to store attached images
         settings: {
             systemPrompt: localStorage.getItem('systemPrompt') || 'You are a helpful AI assistant.',
             numCtx: Number(localStorage.getItem('numCtx') || 4096),
@@ -263,7 +363,7 @@ $(document).ready(function () {
 
         debouncedConditionalScroll: utils.debounce(() => ui.conditionalScrollToBottom(), 50),
 
-        appendMessage(role, content = '') {
+        appendMessage(role, content = '', images = []) {
              const avatarIcon = { user: 'fa-user', ai: 'fa-robot', system: 'fa-triangle-exclamation' }[role];
              const formattedContent = (role === 'user') 
                  ? content.replace(/</g, "&lt;").replace(/>/g, "&gt;")
@@ -271,6 +371,63 @@ $(document).ready(function () {
 
              const $messageContainer = $(`<div class="message ${role}"><div class="avatar"><i class="fas ${avatarIcon}"></i></div><div class="message-content"></div></div>`);
              const $messageContent = $messageContainer.find('.message-content').html(formattedContent);
+
+             // Add images if provided
+             if (images && images.length > 0) {
+                 images.forEach(imageData => {
+                     const $img = $('<img class="message-image full-size" alt="Attached image">');
+                     if (typeof imageData === 'string') {
+                         // If it's already a full data URL, use as is
+                         if (imageData.startsWith('data:')) {
+                             $img.attr('src', imageData);
+                         } else {
+                             // If it's just base64 data, add the prefix
+                             $img.attr('src', `data:image/jpeg;base64,${imageData}`);
+                         }
+                     } else if (imageData.base64) {
+                         $img.attr('src', `data:image/jpeg;base64,${imageData.base64}`);
+                     }
+                     
+                     // Add click handler for image enlargement
+                     $img.on('click', function() {
+                         const $modal = $('<div class="image-modal-overlay"></div>');
+                         const $modalContent = $('<div class="image-modal-content"></div>');
+                         const $modalImg = $('<img class="image-modal-img">').attr('src', $(this).attr('src'));
+                         
+                         // Add error handling for modal image
+                         $modalImg.on('error', function() {
+                             $(this).attr('src', 'data:image/svg+xml,<svg xmlns="http://www.w3.org/2000/svg" width="300" height="300" viewBox="0 0 300 300"><rect width="300" height="300" fill="%23f0f0f0"/><text x="150" y="150" text-anchor="middle" dy=".3em" fill="%23999" font-size="16">Image failed to load</text></svg>');
+                         });
+                         
+                         $modalContent.append($modalImg);
+                         $modal.append($modalContent);
+                         $('body').append($modal);
+                         
+                         $modal.on('click', function() {
+                             $modal.remove();
+                         });
+                         
+                         $modalContent.on('click', function(e) {
+                             e.stopPropagation();
+                         });
+                         
+                         // Add keyboard support for closing modal
+                         $(document).on('keydown.modal', function(e) {
+                             if (e.key === 'Escape') {
+                                 $modal.remove();
+                                 $(document).off('keydown.modal');
+                             }
+                         });
+                     });
+                     
+                     // Add error handling for images
+                     $img.on('error', function() {
+                         $(this).attr('src', 'data:image/svg+xml,<svg xmlns="http://www.w3.org/2000/svg" width="300" height="300" viewBox="0 0 300 300"><rect width="300" height="300" fill="%23f0f0f0"/><text x="150" y="150" text-anchor="middle" dy=".3em" fill="%23999" font-size="16">Image failed to load</text></svg>');
+                     });
+                     
+                     $messageContent.append($img);
+                 });
+             }
 
              if (role === 'ai') {
                  $messageContainer.append('<button class="copy-message-button" title="Copy message as markdown"><i class="fas fa-copy"></i></button>');
@@ -326,29 +483,98 @@ $(document).ready(function () {
                 this.autoResizeTextarea();
                 dom.messageInput.focus();
             }, 0);
+        },
+
+        // Image handling functions
+        createImagePreview() {
+            if (!dom.imagePreview) {
+                dom.imagePreview = $('<div class="image-preview"></div>');
+                dom.chatForm.prepend(dom.imagePreview);
+            }
+            return dom.imagePreview;
+        },
+
+        addImageToPreview(file) {
+            const $preview = this.createImagePreview();
+            const $previewItem = utils.createImagePreview(file, () => {
+                // Remove from state when image is removed
+                const index = state.attachedImages.findIndex(img => img.file === file);
+                if (index > -1) {
+                    state.attachedImages.splice(index, 1);
+                }
+                if (state.attachedImages.length === 0) {
+                    dom.imagePreview.remove();
+                    dom.imagePreview = null;
+                }
+            });
+            
+            $preview.append($previewItem);
+            state.attachedImages.push({ file, element: $previewItem });
+        },
+
+        clearImagePreview() {
+            if (dom.imagePreview) {
+                dom.imagePreview.remove();
+                dom.imagePreview = null;
+            }
+            state.attachedImages = [];
         }
     };
 
     // --- Core Chat Functions (ENHANCED for streaming) ---
     async function sendMessage() {
         const messageText = dom.messageInput.val().trim();
-        if (!messageText || state.isProcessing) return;
+        const hasImages = state.attachedImages.length > 0;
+        
+        if ((!messageText && !hasImages) || state.isProcessing) return;
 
         ui.setProcessingState(true);
         $('#placeholderMessage').remove();
-        // Since user content is now displayed in a container, we can render it as plain text
-        const $userMessageContent = ui.appendMessage('user', '');
-        $userMessageContent.text(messageText);
 
-        state.messages.push({ role: "user", content: messageText });
+        // Prepare images for sending
+        const imagesToSend = [];
+        if (hasImages) {
+            for (const imageData of state.attachedImages) {
+                try {
+                    const compressedBlob = await utils.compressImage(imageData.file);
+                    const base64 = await utils.fileToBase64(compressedBlob);
+                    // Remove the data:image/...;base64, prefix
+                    const base64Data = base64.split(',')[1];
+                    imagesToSend.push(base64Data);
+                } catch (error) {
+                    console.error('Error processing image:', error);
+                    // Show error message to user
+                    ui.appendMessage('system', `Error processing image ${imageData.file.name}: ${error.message}`);
+                }
+            }
+        }
+
+        // Render user message with images
+        const $userMessageContent = ui.appendMessage('user', messageText, imagesToSend);
+
+        // Prepare message for API
+        const messageContent = messageText || '';
+        const messageImages = imagesToSend;
+        
+        // Create message object for API
+        const messageObj = {
+            role: "user",
+            content: messageContent,
+            images: messageImages.length > 0 ? messageImages : undefined
+        };
+
+        state.messages.push(messageObj);
         ui.resetInput();
+        ui.clearImagePreview();
 
         try {
             const llmOptions = { temperature: state.settings.temperature, numCtx: state.settings.numCtx };
             const fullHistory = [{ role: 'system', content: state.settings.systemPrompt }, ...state.messages];
             
             if (state.settings.isStreaming) {
-                const $aiContent = ui.appendMessage('ai').addClass('is-thinking');
+                const $aiContent = ui.appendMessage('ai');
+                const $aiMessageContainer = $aiContent.closest('.message');
+                $aiMessageContainer.addClass('is-thinking');
                 let currentFullResponse = "";
                 let isFirstChunk = true;
                 
@@ -357,7 +583,7 @@ $(document).ready(function () {
 
                 const onChunk = (chunk) => {
                     if (isFirstChunk && chunk.trim()) {
-                        $aiContent.removeClass('is-thinking');
+                        $aiMessageContainer.removeClass('is-thinking');
                         isFirstChunk = false;
                     }
                     currentFullResponse += chunk;
@@ -373,7 +599,10 @@ $(document).ready(function () {
                 };
 
                 const finalResponse = await llmApi.stream(fullHistory, onChunk, llmOptions);
-                if (isFirstChunk) $aiContent.removeClass('is-thinking');
+                // Remove thinking indicator if it's still showing
+                if (isFirstChunk) {
+                    $aiMessageContainer.removeClass('is-thinking');
+                }
 
                 // Final render without the cursor
                 const finalHTML = utils.formatMessageContent(finalResponse);
@@ -398,7 +627,14 @@ $(document).ready(function () {
             }
         } catch (error) {
             console.error("Error getting response:", error);
-            ui.appendMessage('system', `Error occurred: ${error.message}`);
+            let errorMessage = `Error occurred: ${error.message}`;
+            
+            // Check if error is related to images
+            if (error.message.includes('images') || error.message.includes('multimodal')) {
+                errorMessage = "This model may not support images. Please try without images or use a multimodal model.";
+            }
+            
+            ui.appendMessage('system', errorMessage);
         } finally {
             ui.setProcessingState(false);
             dom.messageInput.focus();
@@ -411,6 +647,67 @@ $(document).ready(function () {
     dom.messageInput.on('keydown', (e) => {
         if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendMessage(); }
     }).on('input', ui.autoResizeTextarea);
+
+    // Image attachment handlers
+    dom.attachImageButton.on('click', () => {
+        dom.imageInput.click();
+    });
+
+    dom.imageInput.on('change', async (e) => {
+        const files = Array.from(e.target.files);
+        if (files.length === 0) return;
+
+        for (const file of files) {
+            if (file.type.startsWith('image/')) {
+                // Check file size (max 10MB)
+                if (file.size > 10 * 1024 * 1024) {
+                    console.warn('File too large:', file.name);
+                    continue;
+                }
+                ui.addImageToPreview(file);
+            } else {
+                console.warn('Non-image file selected:', file.name);
+            }
+        }
+
+        // Clear the input for future selections
+        dom.imageInput.val('');
+    });
+
+    // Drag and drop support
+    dom.chatForm.on('dragover', (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        dom.chatForm.addClass('drag-over');
+    });
+
+    dom.chatForm.on('dragleave', (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        dom.chatForm.removeClass('drag-over');
+    });
+
+    dom.chatForm.on('drop', async (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        dom.chatForm.removeClass('drag-over');
+        
+        const files = Array.from(e.dataTransfer.files);
+        if (files.length === 0) return;
+
+        for (const file of files) {
+            if (file.type.startsWith('image/')) {
+                // Check file size (max 10MB)
+                if (file.size > 10 * 1024 * 1024) {
+                    console.warn('File too large:', file.name);
+                    continue;
+                }
+                ui.addImageToPreview(file);
+            } else {
+                console.warn('Non-image file selected:', file.name);
+            }
+        }
+    });
 
     function setupScrollButton() {
         const $chatMessages = dom.chatMessages;
