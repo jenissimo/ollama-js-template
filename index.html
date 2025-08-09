@@ -2,7 +2,12 @@
 <html lang="en" data-theme="light">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover, user-scalable=no">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="default">
+    <meta name="apple-mobile-web-app-title" content="Ollama Chat">
+    <meta name="mobile-web-app-capable" content="yes">
+    <meta name="theme-color" content="#4f46e5">
     <title>Ollama Chat</title>
     <meta name="description" content="Lightweight interface for Ollama API with Markdown support and code highlighting.">
     
@@ -58,7 +63,7 @@
                     </button>
                     <input type="file" id="imageInput" accept="image/*" style="display: none;">
                 </div>
-                <textarea id="messageInput" placeholder="Type your message... (Shift+Enter for new line)" rows="1"></textarea>
+                <textarea id="messageInput" placeholder="Type your message... (Enter to send, Shift+Enter for new line)" rows="1"></textarea>
                 <button id="sendButton" class="send-button" type="submit" title="Send">
                     <i class="fas fa-paper-plane"></i>
                 </button>

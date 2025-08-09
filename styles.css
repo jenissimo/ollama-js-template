@@ -45,7 +45,16 @@ html { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helve
 body { margin: 0; background: var(--color-bg); color: var(--color-text); height: 100vh; width: 100vw; overflow: hidden; }
 
 /* 2. CORE LAYOUT & HEADER */
-.chat-root { display: flex; flex-direction: column; height: 100vh; }
+.chat-root { 
+    display: flex; 
+    flex-direction: column; 
+    height: 100vh; 
+    height: -webkit-fill-available;
+    min-height: -webkit-fill-available;
+    position: relative;
+    overflow: hidden;
+}
+
 .chat-header { 
     flex-shrink: 0; 
     display: flex; 
@@ -58,7 +67,11 @@ body { margin: 0; background: var(--color-bg); color: var(--color-text); height:
     box-shadow: var(--color-shadow); 
     z-index: 10;
     position: relative;
+    /* Ensure header is always visible */
+    position: sticky;
+    top: 0;
 }
+
 .chat-header::before {
     content: '';
     position: absolute;
@@ -69,7 +82,21 @@ body { margin: 0; background: var(--color-bg); color: var(--color-text); height:
     background: linear-gradient(135deg, rgba(255,255,255,0.1) 0%, rgba(255,255,255,0.05) 100%);
     pointer-events: none;
 }
-.chat-main { flex-grow: 1; display: flex; flex-direction: column; width: 100%; max-width: 1200px; margin: 0 auto; background: var(--color-main); min-height: 0; box-shadow: var(--color-shadow); position: relative; }
+
+.chat-main { 
+    flex-grow: 1; 
+    display: flex; 
+    flex-direction: column; 
+    width: 100%; 
+    max-width: 1200px; 
+    margin: 0 auto; 
+    background: var(--color-main); 
+    min-height: 0; 
+    box-shadow: var(--color-shadow); 
+    position: relative;
+    height: calc(100vh - 72px);
+    height: calc(-webkit-fill-available - 72px);
+}
 .chat-messages { 
     flex-grow: 1; 
     overflow-y: auto; 
@@ -77,6 +104,8 @@ body { margin: 0; background: var(--color-bg); color: var(--color-text); height:
     min-height: 0; 
     display: flex;
     flex-direction: column;
+    -webkit-overflow-scrolling: touch;
+    scroll-behavior: smooth;
 }
 .chat-input-area { 
     flex-shrink: 0; 
@@ -716,6 +745,39 @@ pre:hover .copy-code-button { opacity: 1; transform: translateY(-2px); }
     transform: none;
 }
 
+/* Stop button styles */
+.stop-button { 
+    flex-shrink: 0; 
+    background: linear-gradient(135deg, #dc2626, color-mix(in srgb, #dc2626 80%, transparent));
+    border: none; 
+    color: white; 
+    width: 56px; 
+    height: 56px; 
+    border-radius: 50%; 
+    cursor: pointer; 
+    font-size: 1.2rem; 
+    display: flex; 
+    align-items: center; 
+    justify-content: center; 
+    transition: var(--transition);
+    box-shadow: var(--color-shadow);
+    gap: 4px;
+}
+.stop-button:hover:not(:disabled) { 
+    transform: translateY(-2px) scale(1.05);
+    box-shadow: var(--color-shadow-lg);
+    background: linear-gradient(135deg, #b91c1c, color-mix(in srgb, #b91c1c 80%, transparent));
+}
+.stop-button:disabled { 
+    background: var(--color-secondary); 
+    cursor: not-allowed;
+    transform: none;
+}
+.stop-button span {
+    font-size: 0.8rem;
+    font-weight: 600;
+}
+
 /* 11. LOADING INDICATOR - FIXED */
 .loading-indicator { 
     display: none; 
@@ -830,14 +892,74 @@ pre:hover .copy-code-button { opacity: 1; transform: translateY(-2px); }
 
 /* 13. RESPONSIVE */
 @media (max-width: 768px) { 
-    body { background: var(--color-main); } 
-    .chat-main { border-radius: 0; box-shadow: none; } 
-    .chat-header { height: 64px; padding: 0 20px; } 
-    .chat-messages { padding: 20px; } 
-    .chat-input-area { padding: 16px 20px; } 
-    .message-content { max-width: 90%; padding: 16px 20px; }
-    .avatar { width: 40px; height: 40px; }
-    .modal-content { padding: 24px; margin: 20px; }
+    body { 
+        background: var(--color-main); 
+        /* Fix for Safari on iPhone */
+        height: 100vh;
+        height: -webkit-fill-available;
+        overflow: hidden;
+    } 
+    
+    .chat-root { 
+        height: 100vh;
+        height: -webkit-fill-available;
+        /* Ensure proper viewport handling */
+        min-height: -webkit-fill-available;
+    }
+    
+    .chat-main { 
+        border-radius: 0; 
+        box-shadow: none; 
+        height: calc(100vh - 64px);
+        height: calc(-webkit-fill-available - 64px);
+    } 
+    
+    .chat-header { 
+        height: 64px; 
+        padding: 0 20px; 
+        /* Ensure header is always visible */
+        position: relative;
+        z-index: 1000;
+        /* Fix for Safari status bar */
+        padding-top: env(safe-area-inset-top);
+        min-height: 64px;
+    } 
+    
+    .chat-messages { 
+        padding: 20px;
+        /* Ensure proper scrolling */
+        -webkit-overflow-scrolling: touch;
+        height: calc(100vh - 64px - 120px);
+        height: calc(-webkit-fill-available - 64px - 120px);
+    } 
+    
+    .chat-input-area { 
+        padding: 16px 20px; 
+        /* Ensure input area is always visible */
+        position: relative;
+        z-index: 999;
+        /* Fix for Safari bottom safe area */
+        padding-bottom: calc(16px + env(safe-area-inset-bottom));
+    } 
+    
+    .message-content { 
+        max-width: 90%; 
+        padding: 16px 20px; 
+    }
+    
+    .avatar { 
+        width: 40px; 
+        height: 40px; 
+    }
+    
+    .modal-content { 
+        padding: 24px; 
+        margin: 20px;
+        /* Ensure modal is properly sized on mobile */
+        max-height: calc(100vh - 40px);
+        max-height: calc(-webkit-fill-available - 40px);
+        overflow-y: auto;
+    }
     
     /* Mobile adjustments for placeholder */
     .placeholder-message {
@@ -857,6 +979,125 @@ pre:hover .copy-code-button { opacity: 1; transform: translateY(-2px); }
         height: 40px;
         padding: 8px;
         font-size: 1rem;
+    }
+    
+    /* Fix for mobile input */
+    #messageInput {
+        min-height: 48px;
+        max-height: 150px;
+        font-size: 16px; /* Prevent zoom on iOS */
+    }
+    
+    /* Ensure send button is properly sized on mobile */
+    .send-button {
+        width: 48px;
+        height: 48px;
+        font-size: 1.1rem;
+    }
+    
+    /* Fix for mobile scroll to bottom button */
+    .scroll-to-bottom-btn {
+        bottom: calc(80px + env(safe-area-inset-bottom));
+        right: 20px;
+        width: 44px;
+        height: 44px;
+        font-size: 1rem;
+    }
+}
+
+/* 14. SAFARI SPECIFIC FIXES */
+@supports (-webkit-touch-callout: none) {
+    /* iOS Safari specific fixes */
+    body {
+        height: 100vh;
+        height: -webkit-fill-available;
+        overflow: hidden;
+        position: fixed;
+        width: 100%;
+    }
+    
+    .chat-root {
+        height: 100vh;
+        height: -webkit-fill-available;
+        position: fixed;
+        top: 0;
+        left: 0;
+        right: 0;
+        bottom: 0;
+    }
+    
+    .chat-header {
+        /* Ensure header stays visible */
+        position: sticky;
+        top: 0;
+        z-index: 1000;
+        /* Fix for Safari status bar */
+        padding-top: env(safe-area-inset-top);
+    }
+    
+    .chat-messages {
+        /* Better scrolling on iOS */
+        -webkit-overflow-scrolling: touch;
+        /* Ensure proper height calculation */
+        height: calc(100vh - 72px - 120px - env(safe-area-inset-top) - env(safe-area-inset-bottom));
+        height: calc(-webkit-fill-available - 72px - 120px - env(safe-area-inset-top) - env(safe-area-inset-bottom));
+    }
+    
+    .chat-input-area {
+        /* Fix for Safari bottom safe area */
+        padding-bottom: calc(24px + env(safe-area-inset-bottom));
+        position: sticky;
+        bottom: 0;
+        background: var(--color-main);
+        z-index: 999;
+    }
+    
+    /* Fix for iOS input zoom */
+    #messageInput,
+    #settingsForm input,
+    #settingsForm textarea {
+        font-size: 16px;
+    }
+    
+    /* Ensure modal works properly on iOS */
+    .modal-overlay {
+        position: fixed;
+        top: env(safe-area-inset-top);
+        left: env(safe-area-inset-left);
+        right: env(safe-area-inset-right);
+        bottom: env(safe-area-inset-bottom);
+    }
+}
+
+/* 15. LANDSCAPE MOBILE */
+@media (max-width: 768px) and (orientation: landscape) {
+    .chat-header {
+        height: 56px;
+        padding: 0 16px;
+    }
+    
+    .chat-main {
+        height: calc(100vh - 56px);
+        height: calc(-webkit-fill-available - 56px);
+    }
+    
+    .chat-messages {
+        height: calc(100vh - 56px - 100px);
+        height: calc(-webkit-fill-available - 56px - 100px);
+        padding: 16px;
+    }
+    
+    .chat-input-area {
+        padding: 12px 16px;
+    }
+    
+    .message-content {
+        padding: 12px 16px;
+    }
+    
+    .avatar {
+        width: 36px;
+        height: 36px;
     }
 }
 

@@ -69,12 +69,13 @@ const llmApi = {
         return body;
     },
 
-    async stream(messages, onChunk, options) {
+    async stream(messages, onChunk, options, signal) {
         const body = await this._buildRequestBody(messages, { ...options, stream: true });
         const response = await fetch(`${this.API_URL}/chat`, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify(body),
+            signal: signal // Pass the signal to the fetch API
         });
 
         if (!response.ok) throw new Error(`Network error: ${response.status}`);
@@ -85,25 +86,34 @@ const llmApi = {
         let fullResponse = "";
         let buffer = "";
 
-        while (true) {
-            const { done, value } = await reader.read();
-            if (done) break;
-            buffer += decoder.decode(value, { stream: true });
-            const lines = buffer.split('\n');
-            buffer = lines.pop() || '';
+        try {
+            while (true) {
+                // Check if the signal is aborted
+                if (signal && signal.aborted) {
+                    throw new Error('Aborted');
+                }
+                
+                const { done, value } = await reader.read();
+                if (done) break;
+                buffer += decoder.decode(value, { stream: true });
+                const lines = buffer.split('\n');
+                buffer = lines.pop() || '';
 
-            for (const line of lines) {
-                if (!line.trim()) continue;
-                try {
-                    const chunkContent = JSON.parse(line).message?.content;
-                    if (chunkContent) {
-                        fullResponse += chunkContent;
-                        onChunk(chunkContent);
+                for (const line of lines) {
+                    if (!line.trim()) continue;
+                    try {
+                        const chunkContent = JSON.parse(line).message?.content;
+                        if (chunkContent) {
+                            fullResponse += chunkContent;
+                            onChunk(chunkContent);
+                        }
+                    } catch (error) {
+                        console.warn("Skipped non-JSON line in stream:", line);
                     }
-                } catch (error) {
-                    console.warn("Skipped non-JSON line in stream:", line);
                 }
             }
+        } finally {
+            reader.releaseLock();
         }
         return fullResponse;
     },
@@ -131,6 +141,11 @@ const llmApi = {
 
 // --- 2. Utilities Module (ENHANCED) ---
 const utils = {
+    // Helper function to detect mobile devices
+    isMobileDevice() {
+        return /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent) || window.innerWidth <= 768;
+    },
+
     formatMessageContent(text = '') {
         // 1. First, protect code blocks from HTML escaping
         const codeBlocks = [];
@@ -340,6 +355,8 @@ $(document).ready(function () {
             selectedModel: localStorage.getItem('selectedModel') || null, // Will be set dynamically
         },
         isProcessing: false,
+        isStreaming: false, // New: track if streaming is active
+        currentAbortController: null, // New: abort controller for streaming
     };
 
     // --- UI Logic Module (ENHANCED) ---
@@ -460,9 +477,31 @@ $(document).ready(function () {
             });
         },
 
-        setProcessingState(isProcessing) {
+        setProcessingState(isProcessing, isStreaming = false) {
             state.isProcessing = isProcessing;
-            dom.sendButton.prop('disabled', isProcessing);
+            state.isStreaming = isStreaming;
+            
+            // Update button appearance based on state
+            const $button = dom.sendButton;
+            const $icon = $button.find('i');
+            const $buttonText = $button.find('span');
+            
+            if (isStreaming) {
+                // Show stop button
+                $button.removeClass('send-button').addClass('stop-button');
+                $icon.removeClass('fa-paper-plane').addClass('fa-stop');
+                $button.prop('title', 'Stop streaming');
+            } else {
+                // Show send button
+                $button.removeClass('stop-button').addClass('send-button');
+                $icon.removeClass('fa-stop').addClass('fa-paper-plane');
+                if ($buttonText.length > 0) {
+                    $buttonText.remove();
+                }
+                $button.prop('title', 'Send');
+            }
+            
+            dom.sendButton.prop('disabled', isProcessing && !isStreaming);
             dom.messageInput.prop('disabled', isProcessing);
             // Only show loading indicator for non-streaming mode
             if (!state.settings.isStreaming) {
@@ -524,6 +563,40 @@ $(document).ready(function () {
                 dom.imagePreview = null;
             }
             state.attachedImages = [];
+        },
+
+        // New function to stop streaming
+        stopStreaming() {
+            if (state.isStreaming && state.currentAbortController) {
+                state.currentAbortController.abort();
+                state.currentAbortController = null;
+                state.isStreaming = false;
+                this.setProcessingState(false, false);
+                
+                // Remove the cursor from the current message and save the partial response
+                const $aiContent = dom.chatMessages.find('.message.ai:last-child .message-content');
+                if ($aiContent.length > 0) {
+                    const currentText = $aiContent.text();
+                    let cleanText = currentText;
+                    
+                    // Remove cursor if present
+                    if (currentText.endsWith('█')) {
+                        cleanText = currentText.slice(0, -1);
+                    }
+                    
+                    // Update the display
+                    if (cleanText.trim()) {
+                        $aiContent.html(utils.formatMessageContent(cleanText));
+                        utils.applySyntaxHighlighting($aiContent);
+                        
+                        // Update the last assistant message in state.messages (it should already exist)
+                        const lastAssistantIndex = state.messages.length - 1;
+                        if (lastAssistantIndex >= 0 && state.messages[lastAssistantIndex].role === 'assistant') {
+                            state.messages[lastAssistantIndex].content = cleanText;
+                        }
+                    }
+                }
+            }
         }
     };
 
@@ -534,7 +607,7 @@ $(document).ready(function () {
         
         if ((!messageText && !hasImages) || state.isProcessing) return;
 
-        ui.setProcessingState(true);
+        ui.setProcessingState(true, false);
         $('#placeholderMessage').remove();
 
         // Prepare images for sending
@@ -587,12 +660,24 @@ $(document).ready(function () {
                 // Reset scroll lock state at the start of a new message
                 ui.userHasScrolled = false;
 
+                // Create abort controller for streaming
+                state.currentAbortController = new AbortController();
+                ui.setProcessingState(true, true);
+
+                // Add assistant message to state immediately (will be updated as we receive chunks)
+                const assistantMessageIndex = state.messages.length;
+                state.messages.push({ role: "assistant", content: "" });
+
                 const onChunk = (chunk) => {
                     if (isFirstChunk && chunk.trim()) {
                         $aiMessageContainer.removeClass('is-thinking');
                         isFirstChunk = false;
                     }
                     currentFullResponse += chunk;
+                    
+                    // Update the message in state.messages
+                    state.messages[assistantMessageIndex].content = currentFullResponse;
+                    
                     // Use the final formatting logic for streaming to ensure consistency
                     const processedHTML = utils.formatMessageContent(currentFullResponse + "█");
                     $aiContent.html(processedHTML);
@@ -604,19 +689,22 @@ $(document).ready(function () {
                     ui.conditionalScrollToBottom();
                 };
 
-                const finalResponse = await llmApi.stream(fullHistory, onChunk, llmOptions);
+                // Create history without the empty assistant message for the API call
+                const apiHistory = [{ role: 'system', content: state.settings.systemPrompt }, ...state.messages.slice(0, -1)];
+                const finalResponse = await llmApi.stream(apiHistory, onChunk, llmOptions, state.currentAbortController.signal);
                 // Remove thinking indicator if it's still showing
                 if (isFirstChunk) {
                     $aiMessageContainer.removeClass('is-thinking');
                 }
 
-                // Final render without the cursor
+                // Final render without the cursor and update the final content
                 const finalHTML = utils.formatMessageContent(finalResponse);
                 $aiContent.html(finalHTML);
                 
+                // Update the final content in state.messages (remove cursor if present)
+                state.messages[assistantMessageIndex].content = finalResponse;
+                
                 ui.finalizeMessage($aiContent);
-
-                state.messages.push({ role: "assistant", content: finalResponse });
                 
                 // One final scroll to the bottom if the user hasn't scrolled away
                 ui.conditionalScrollToBottom();
@@ -640,18 +728,49 @@ $(document).ready(function () {
                 errorMessage = "This model may not support images. Please try without images or use a multimodal model.";
             }
             
+            // Check if it's an abort error
+            if (error.name === 'AbortError' || error.message === 'Aborted') {
+                errorMessage = "Streaming stopped by user.";
+            }
+            
             ui.appendMessage('system', errorMessage);
         } finally {
-            ui.setProcessingState(false);
+            state.currentAbortController = null;
+            ui.setProcessingState(false, false);
             dom.messageInput.focus();
         }
     }
 
     // --- Event Handlers & Initialization ---
     dom.chatForm.on('submit', (e) => { e.preventDefault(); sendMessage(); });
-    dom.sendButton.on('click', sendMessage);
+    dom.sendButton.on('click', function(e) {
+        e.preventDefault();
+        if (state.isStreaming) {
+            ui.stopStreaming.call(ui);
+        } else {
+            sendMessage();
+        }
+    });
     dom.messageInput.on('keydown', (e) => {
-        if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendMessage(); }
+        // Check if it's a mobile device
+        const isMobile = utils.isMobileDevice();
+        
+        if (e.key === 'Enter') {
+            if (isMobile) {
+                // On mobile: Enter = new line, only send on Ctrl+Enter or Cmd+Enter
+                if (e.ctrlKey || e.metaKey) {
+                    e.preventDefault();
+                    sendMessage();
+                }
+                // Otherwise let Enter create a new line (default behavior)
+            } else {
+                // On desktop: Enter = send, Shift+Enter = new line
+                if (!e.shiftKey) {
+                    e.preventDefault();
+                    sendMessage();
+                }
+            }
+        }
     }).on('input', ui.autoResizeTextarea);
 
     // Image attachment handlers
@@ -745,7 +864,17 @@ $(document).ready(function () {
     function setupDynamicPlaceholder() {
         const setPlaceholder = () => {
             const modelName = state.settings.selectedModel || 'Ollama';
-            dom.messageInput.attr('placeholder', `Message ${modelName}...`);
+            // Check if it's a mobile device
+            const isMobile = utils.isMobileDevice();
+            
+            let placeholderText;
+            if (isMobile) {
+                placeholderText = `Message ${modelName}... (Tap send button or use Ctrl/Cmd+Enter)`;
+            } else {
+                placeholderText = `Message ${modelName}... (Enter to send, Shift+Enter for new line)`;
+            }
+            
+            dom.messageInput.attr('placeholder', placeholderText);
         };
         setPlaceholder(); // Initial set
         // Update when model changes in settings
@@ -753,6 +882,8 @@ $(document).ready(function () {
         $('#settingsModel').on('change', setPlaceholder);
         // Also update when models are populated
         $(document).on('modelsLoaded', setPlaceholder);
+        // Update on window resize (for responsive design)
+        $(window).on('resize', utils.debounce(setPlaceholder, 250));
     }
 
     function setupSettings() {
