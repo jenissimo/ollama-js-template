@@ -16,7 +16,13 @@ marked.setOptions({
 
 // --- 1. API Communication Module ---
 const llmApi = {
-    API_URL: "http://127.0.0.1:11434/api",
+    get API_URL() {
+        // Get host from current URL (works for both localhost and local network)
+        const currentHost = window.location.hostname;
+        const currentPort = window.location.port || (window.location.protocol === 'https:' ? '443' : '80');
+        // Use the same host but default Ollama port 11434
+        return `${window.location.protocol}//${currentHost}:11434/api`;
+    },
 
     async _getDefaultModel() {
         try {
